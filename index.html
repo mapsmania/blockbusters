@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>US States Pathfinding Game</title>
+ <link href="style.css" rel="stylesheet" />
+</head>
+<body>
+<div class="wrap">
+  <div class="game-title">US States Pathfinding Game</div>
+  <div class="game-instructions">Create a path from the West Coast to the East Coast! Start with a purple state and guess if the next state's ID is higher or lower.</div>
+  <div class="svg-container"><svg id="hexsvg" viewBox="0 0 960 600" preserveAspectRatio="xMidYMid meet" aria-label="USA hexmap"></svg></div>
+  <div class="question-panel" id="questionPanel">
+    <div class="question-text" id="questionText"></div>
+    <div class="controls">
+      <button id="btnLower">Lower</button>
+      <button id="btnHigher">Higher</button>
+    </div>
+  </div>
+</div>
+
+<div class="tooltip" id="tip"></div>
+<div class="score-panel">Score: <span id="score">0</span></div>
+<div class="game-over" id="gameOver">
+  <h2>Game Over!</h2>
+  <p>You've created a path across the US!</p>
+  <p>Final Score: <span id="finalScore">0</span></p>
+  <button class="restart-btn" id="restartBtn">Play Again</button>
+</div>
+<script src="script.js"></script> 
+</body>
+</html>
