@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>US Hex Map – Population Choropleth</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --border: #ffffff;
+    --text: #333;
+    --tip-bg: #333;
+    --tip-text: #fff;
+
+    /* Use a blue→red gradient for population */
+    --low: #b3cde3;
+    --mid: #6497b1;
+    --high: #005b96;
+  }
+
+  body {
+    font-family: Arial, sans-serif;
+    background: var(--bg);
+    margin: 0;
+    padding: 0;
+    text-align: center;
+  }
+
+  h1 {
+    margin-top: 20px;
+    color: var(--text);
+  }
+
+  #mapContainer {
+    display: flex;
+    justify-content: center;
+    margin-top: 10px;
+  }
+
+  svg {
+    width: 960px;
+    height: 600px;
+    border: 1px solid #ddd;
+    background: white;
+  }
+
+  .hex {
+    stroke: var(--border);
+    stroke-width: 1;
+    cursor: default;
+    transition: fill 0.2s;
+  }
+
+  .hex:hover {
+    stroke: #222;
+    stroke-width: 2;
+  }
+
+  .label {
+    pointer-events: none;
+    text-anchor: middle;
+    dominant-baseline: central;
+    font-size: 11px;
+    font-weight: bold;
+    fill: #fff;
+  }
+
+  #tip {
+    position: fixed;
+    left: -9999px;
+    top: -9999px;
+    background: var(--tip-bg);
+    color: var(--tip-text);
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 13px;
+    pointer-events: none;
+    z-index: 10;
+    white-space: nowrap;
+  }
+
+  #legend {
+    margin: 20px auto;
+    width: 300px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+  }
+
+  #legendBar {
+    height: 12px;
+    width: 300px;
+    background: linear-gradient(to right, var(--low), var(--mid), var(--high));
+    margin-bottom: 4px;
+  }
+</style>
+</head>
+<body>
+
+<h1>US Population Choropleth – Hex Map</h1>
+
+<div id="mapContainer">
+  <svg id="hexsvg"></svg>
+</div>
+
+<div id="legendBar"></div>
+<div id="legend">
+  <span>Low</span><span>High</span>
+</div>
+
+<div id="tip"></div>
+
+<script>
+(async function() {
+
+  const DATA_URL = "https://mapsmania.github.io/typographic/states.json";
+  const POP_URL = "population.json";
+
+  const svg = document.getElementById("hexsvg");
+  const tip = document.getElementById("tip");
+
+  const W = 960, H = 600;
+
+  // Load map + population
+  const geo = await fetch(DATA_URL).then(r => r.json());
+  const pop = await fetch(POP_URL).then(r => r.json()); // { "CA": 39538223, ... }
+
+  // Helpers
+  function eachPolygonCoords(feature, cb) {
+    const g = feature.geometry;
+    if (!g) return;
+    if (g.type === "Polygon") g.coordinates.forEach(r => cb(r));
+    else if (g.type === "MultiPolygon") g.coordinates.forEach(poly => poly.forEach(r => cb(r)));
+  }
+
+  function computeBounds(features) {
+    let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+    for (const f of features) {
+      eachPolygonCoords(f, ring => ring.forEach(([x,y]) => {
+        minX=Math.min(minX,x); minY=Math.min(minY,y);
+        maxX=Math.max(maxX,x); maxY=Math.max(maxY,y);
+      }));
+    }
+    return {minX, minY, maxX, maxY};
+  }
+
+  function createProjector(b, pad=24) {
+    const dx=b.maxX-b.minX, dy=b.maxY-b.minY;
+    const sx=(W-2*pad)/(dx||1), sy=(H-2*pad)/(dy||1);
+    const s=Math.min(sx,sy);
+    const tx=(W-s*dx)/2-s*b.minX, ty=(H-s*dy)/2+s*b.maxY;
+    return ([x,y]) => [s*x+tx, -s*y+ty];
+  }
+
+  function featureLabel(p={}) {
+    return p.name || p.state || p.abbr || p.postal || "";
+  }
+  function getAbbr(p={}) {
+    return (p.abbr||p.postal||p.state||p.name||"").toString().toUpperCase();
+  }
+
+  // Color scale
+  const values = Object.values(pop);
+  const minPop = Math.min(...values);
+  const maxPop = Math.max(...values);
+
+  function colorForPopulation(v) {
+    // Normalize 0–1
+    const t = (v - minPop) / (maxPop - minPop);
+    // Interpolate low → mid → high
+    if (t < 0.5) {
+      return interpolateColor("--low", "--mid", t*2);
+    } else {
+      return interpolateColor("--mid", "--high", (t-0.5)*2);
+    }
+  }
+
+  function interpolateColor(c1, c2, t) {
+    const a = getCSSColor(c1);
+    const b = getCSSColor(c2);
+    const mix = (x,y)=>Math.round(x+(y-x)*t);
+    return `rgb(${mix(a[0],b[0])},${mix(a[1],b[1])},${mix(a[2],b[2])})`;
+  }
+
+  function getCSSColor(varName) {
+    const c = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+    const m = c.match(/#(..)(..)(..)/);
+    return [parseInt(m[1],16), parseInt(m[2],16), parseInt(m[3],16)];
+  }
+
+  // ---- Draw Map ----
+  svg.innerHTML = "";
+  const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  svg.appendChild(g);
+
+  const features = geo.features;
+  const bounds = computeBounds(features);
+  const project = createProjector(bounds);
+
+  for (const f of features) {
+    const label = featureLabel(f.properties);
+    const abbr = getAbbr(f.properties);
+    const value = pop[abbr];
+
+    const polys = (f.geometry.type === "Polygon")
+      ? [f.geometry.coordinates]
+      : f.geometry.coordinates;
+
+    for (const polygon of polys) {
+      let d = "";
+      for (const ring of polygon) {
+        ring.forEach(([x,y],i) => {
+          const [px,py] = project([x,y]);
+          d += (i===0 ? `M ${px} ${py}` : ` L ${px} ${py}`);
+        });
+        d += " Z ";
+      }
+
+      const path = document.createElementNS("http://www.w3.org/2000/svg","path");
+      path.setAttribute("d", d.trim());
+      path.setAttribute("class", "hex");
+      path.style.fill = colorForPopulation(value);
+      path.setAttribute("aria-label", `${label}: ${value.toLocaleString()} people`);
+
+      path.addEventListener("pointerenter", e=>{
+        tip.textContent = `${label}: ${value.toLocaleString()}`;
+        tip.style.left = (e.clientX + 12) + "px";
+        tip.style.top = (e.clientY + 12) + "px";
+      });
+      path.addEventListener("pointermove", e=>{
+        tip.style.left = (e.clientX + 12) + "px";
+        tip.style.top = (e.clientY + 12) + "px";
+      });
+      path.addEventListener("pointerleave", ()=>{
+        tip.style.left = "-9999px";
+      });
+
+      g.appendChild(path);
+
+      const outer = polygon[0];
+      const [cx0,cy0] = outer[Math.floor(outer.length / 2)];
+      const [cx,cy] = project([cx0,cy0]);
+
+      const text = document.createElementNS("http://www.w3.org/2000/svg","text");
+      text.setAttribute("x",cx);
+      text.setAttribute("y",cy);
+      text.setAttribute("class","label");
+      text.textContent = f.properties.abbr;
+      g.appendChild(text);
+    }
+  }
+
+})();
+</script>
+
+</body>
+</html>
